@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import logging
 from datetime import datetime
 import torch.nn.functional as F
+import time
 device = 'cuda'
 
 #logging.basicConfig(filename=datetime.now().strftime('logs/%d-%m_%H:%M-lowiter-postpad.log'), filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
@@ -101,7 +102,7 @@ noise_level = 0.05
 reg_param = 0.3
 stepsize = 0.2
 
-#%%
+
 # Initialize models
 # this one is poor
 # strong_convexity = 0.1
@@ -112,9 +113,9 @@ stepsize = 0.2
 # icnn_fwd.load_state_dict(torch.load('checkpoints/lowiter_postpad/1450fwd_small', map_location='cuda:0'))
 # icnn_bwd.load_state_dict(torch.load('checkpoints/lowiter_postpad/1450bwd_small', map_location='cuda:0'))
 
-#%%
-# this one works!!
 
+# this one works!!
+# In line with training
 strong_convexity = 0.1
 icnn_fwd = ICNN(num_in_channels=3, num_filters=50, kernel_dim=3, num_layers=3, strong_convexity = strong_convexity).to(device)
 icnn_fwd.initialize_weights()
@@ -124,18 +125,15 @@ icnn_fwd.load_state_dict(torch.load('checkpoints/stackedloss/1500fwd_small', map
 icnn_bwd.load_state_dict(torch.load('checkpoints/stackedloss/1500bwd_small', map_location='cuda:0'))
 
 
-
-
-
-
-#%%
 icnn_fwd.eval()
 icnn_bwd.eval()
+# MODIFY THIS PATH TO YOUR DATA
 stl10_data_test = torchvision.datasets.STL10('./stl10', split='test', transform=torchvision.transforms.ToTensor(), folds=1)
 test_dataloader = torch.utils.data.DataLoader(stl10_data_test, batch_size=1)
 
 #%%
 # This one plots the MD iterations
+# in order: original, noisy, fwd(noisy), bwd(fwd(noisy)), 20x MD iterations, result after 20x GD
 ctr = 0
 
 for batch_, _ in test_dataloader:
@@ -147,6 +145,8 @@ for batch_, _ in test_dataloader:
     batch_noisy = (batch_ + noise_level * torch.randn_like(batch_, requires_grad = True)).to(device)
     
     batch_noisy_ = batch_noisy.cpu().detach().numpy()
+    
+    
     plt.figure()
     plt.imshow(batch_[0,:,:,:].permute(1,2,0))
     plt.figure()
@@ -221,7 +221,17 @@ for batch_, _ in test_dataloader:
     plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
 
     break
-
+#%%
+# Plot pointwise ratio of fwd map to noisy image (per channel)
+plt.figure()
+plt.imshow(torch.clamp(foo/batch_noisy,-1,1).detach().cpu().numpy()[0,0])
+plt.colorbar()
+plt.figure()
+plt.imshow(torch.clamp(foo/batch_noisy,-1,1).detach().cpu().numpy()[0,1])
+plt.colorbar()
+plt.figure()
+plt.imshow(torch.clamp(foo/batch_noisy,-1,1).detach().cpu().numpy()[0,2])
+plt.colorbar()
 #%%
 # This one plots the evolution of loss
 ctr = 0
@@ -269,13 +279,17 @@ for batch_, _ in test_dataloader:
     
     plt.figure(figsize=(12,10))
     for stepsize_scale in stepsize_scales:
+        
+        fwd = batch_noisy
+        initloss = recon_err(batch_noisy).item()
         torch.cuda.empty_cache()
         mdloss = [initloss]
         gdloss = [initloss]
         
-        print("Initial recon err", recon_err(fwd).item())
+        print("Initial recon err", initloss)
         ## MIRROR DESCENT
-
+        
+        start = time.time()
         for i in range(20):
             #fwd = fwd.clamp(0,1)
             fwd.requires_grad_()
@@ -284,12 +298,13 @@ for batch_, _ in test_dataloader:
             fwd_ = fwd.cpu().detach().numpy()
             # plt.figure()
             # plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
-            print("MD recon", recon_err(fwd).item())
+            #print("MD recon", recon_err(fwd).item())
             mdloss.append(recon_err(fwd).item())
-        
+        end = time.time(); elapsed = end-start; print("md time", elapsed)
         fwd = batch_noisy
         ## GRADIENT DESCENT
         
+        start = time.time()
         for i in range(20):
             fwd.requires_grad_()
             #fwdGrad0 = autograd.grad(recon_err(fwd), fwd)[0].detach()
@@ -297,25 +312,29 @@ for batch_, _ in test_dataloader:
             #fwd = iresnet_model.inverse(icnn(fwd) - stepsize*fwdGrad0) + icnn(fwd) - stepsize*fwdGrad0
             fwd = fwd - stepsize*fwdGrad0*stepsize_scale
             #fwd = icnn(fwd)
-            print("GD recon", recon_err(fwd).item())
+            #print("GD recon", recon_err(fwd).item())
             gdloss.append(recon_err(fwd).item())
             #fwd = (fwd-fwd.min())/(fwd.max()-fwd.min())
-        
+        end = time.time(); elapsed = end-start; print("gd time", elapsed)
         ## ADAM
         adamloss = []
         
         par = batch_noisy.clone().detach()
         par.requires_grad_()
+        # lr here is smaller: 0.05 instead of 0.2
         optimizer = torch.optim.Adam([par], lr=stepsize_scale*0.05)
+        start = time.time()
         for i in range(21):
             optimizer.zero_grad()
             loss = recon_err(par)
             loss.backward(retain_graph=True)
             optimizer.step()
             
-            print("adam recon", recon_err(par).item())
+            #print("adam recon", recon_err(par).item())
             adamloss.append(loss.item())
             #fwd = (fwd-fwd.min())/(fwd.max()-fwd.min())
+        end = time.time(); elapsed = end-start; print("adam time", elapsed)
+        
         
         plt.plot(mdloss, label = "mdloss " + str(stepsize_scale), marker='x')
         plt.plot(gdloss, label = "gdloss " + str(stepsize_scale), marker='o')
@@ -327,6 +346,3 @@ for batch_, _ in test_dataloader:
         plt.legend()
     break
 
-#%%
-plt.imshow(torch.clamp(foo/batch_noisy,-1,1).detach().cpu().numpy()[0,2])
-plt.colorbar()

@@ -14,14 +14,14 @@ import torch.autograd as autograd
 import torchvision
 import matplotlib.pyplot as plt
 #from iunets import iUNet
-import parse_import
+#import parse_import
 import logging
 from datetime import datetime
 import torch.nn.functional as F
 device = 'cuda'
 
-logging.basicConfig(filename=datetime.now().strftime('logs/stackedloss-%d-%m_%H:%M.log'), filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
-logger = logging.getLogger()
+#logging.basicConfig(filename=datetime.now().strftime('logs/stackedloss-%d-%m_%H:%M.log'), filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+#logger = logging.getLogger()
 
 def compute_gradient(net, inp):
     inp_with_grad = inp.requires_grad_(True)
@@ -91,219 +91,241 @@ class ICNN(nn.Module):
         self.final_conv2d.weight.data.clamp_(0)
         return self 
 
-class ICNNCouple:
-    def __init__(self, args, iters, fun = None):
+class ICNNCouple(nn.Module):
+    def __init__(self, stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1)):
+        super(ICNNCouple, self).__init__()
         self.fwd_model = None
         self.bwd_model = None
-        self.args = args
-        self.fun = fun
-        self.funExists = (fun is not None)
+        self.stepsize = nn.Parameter(stepsize_init * torch.ones(num_iters).to(device))
+        self.num_iters = num_iters
+        self.ssmin = stepsize_clamp[0]
+        self.ssmax = stepsize_clamp[1]
         # Logger
         # Checkpoint
         
     def init_fwd(self, num_in_channels=1, num_filters=64, kernel_dim=5, num_layers=10, strong_convexity = 0.5):
-        self.fwd_model = ICNN(num_in_channels, num_filters, kernel_dim, num_layers, strong_convexity)
+        self.fwd_model = ICNN(num_in_channels, num_filters, kernel_dim, num_layers, strong_convexity).to(device)
+        return self
         
     def init_bwd(self, num_in_channels=1, num_filters=64, kernel_dim=5, num_layers=10, strong_convexity = 0.5):
-        self.bwd_model = ICNN(num_in_channels, num_filters, kernel_dim, num_layers, strong_convexity)
+        self.bwd_model = ICNN(num_in_channels, num_filters, kernel_dim, num_layers, strong_convexity).to(device)
+        return self
     
     def clip_fwd(self):
         self.fwd_model.zero_clip_weights()
+        return self
         
     def clip_bwd(self):
         self.bwd_model.zero_clip_weights()
+        return self
         
-    def forward(self, x, stepsize, gradient = None):
-        if self.funExists:
-            gradient = autograd.grad(self.fun(x), x)
-        elif gradient is None:
-            raise ValueError("Function and gradient are both not provided.")
-            
-        fwd = icnn_bwd(icnn_fwd(x) - stepsize*gradient) 
+    def forward(self, x, gradFun = None):
+        if gradFun is None:
+            raise RuntimeError("Gradient function not provided")
+        with torch.no_grad():
+            fwd = x
+            for ss in self.stepsize:
+                fwd = self.bwd_model(self.fwd_model(x) - ss*gradFun(fwd)) 
         return fwd
-        
-args=parse_import.parse_commandline_args()
-torch.cuda.set_device(3)
-laplacian_weight = torch.Tensor([[[[0,-1,0],
-                    [-1,4,-1],
-                    [0,-1,0]]]]).repeat(3,1,1,1).to(device)
+    
+    def clamp_stepsizes(self):
+        with torch.no_grad():
+            self.stepsize.clamp_(self.ssmin,self.ssmax)
+        return self
+            
+    def fwdbwdloss(self, x):
+        return torch.linalg.vector_norm(self.bwd_model(self.fwd_model(x))-x, ord=1)
+    
+# args=parse_import.parse_commandline_args()
+# torch.cuda.set_device(3)
+# laplacian_weight = torch.Tensor([[[[0,-1,0],
+#                     [-1,4,-1],
+#                     [0,-1,0]]]]).repeat(3,1,1,1).to(device)
 
-padder = nn.ReplicationPad2d(1)
+# padder = nn.ReplicationPad2d(1)
 #%%
 # Initialize models
 
-strong_convexity = 0.1
-icnn_fwd = ICNN(num_in_channels=3, num_filters=50, kernel_dim=3, num_layers=3, strong_convexity = strong_convexity).to(device)
-icnn_fwd.initialize_weights()
-icnn_bwd = ICNN(num_in_channels=3, num_filters=75, kernel_dim=3, num_layers=5, strong_convexity = 0.5).to(device)
+# strong_convexity = 0.1
+# icnn_fwd = ICNN(num_in_channels=3, num_filters=50, kernel_dim=3, num_layers=3, strong_convexity = strong_convexity).to(device)
+# icnn_fwd.initialize_weights()
+# icnn_bwd = ICNN(num_in_channels=3, num_filters=75, kernel_dim=3, num_layers=5, strong_convexity = 0.5).to(device)
 
-stl10_data = torchvision.datasets.STL10('/local/scratch/public/hyt35/datasets/STL10', split='train', transform=torchvision.transforms.ToTensor(), folds=1, download=True)
 
+icnn_couple = ICNNCouple(stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1))
+icnn_couple.init_fwd(num_in_channels=3, num_filters=50, kernel_dim=3, num_layers=3, strong_convexity = 0.1)
+icnn_couple.fwd_model.initialize_weights()
+icnn_couple.init_bwd(num_in_channels=3, num_filters=75, kernel_dim=3, num_layers=5, strong_convexity = 0.5)
+
+
+#stl10_data = torchvision.datasets.STL10('/local/scratch/public/hyt35/datasets/STL10', split='train', transform=torchvision.transforms.ToTensor(), folds=1, download=True)
+stl10_data = torchvision.datasets.STL10('./stl10', split='train', transform=torchvision.transforms.ToTensor(), folds=1)
 #%%
-logger.info("fwd params"+str( sum(p.numel() for p in icnn_fwd.parameters())))
-logger.info("bwd params"+str( sum(p.numel() for p in icnn_bwd.parameters())))
+logger.info("fwd params"+str( sum(p.numel() for p in icnn_couple.fwd_model.parameters())))
+logger.info("bwd params"+str( sum(p.numel() for p in icnn_couple.bwd_model.parameters())))
 #%%
-if args.from_checkpoint is not None:
-    icnn_fwd.load_state_dict(torch.load(args.from_checkpoint+'fwd_small'))
-    icnn_bwd.load_state_dict(torch.load(args.from_checkpoint+'bwd_small'))
-
-n_epochs = args.num_epochs
+# if args.from_checkpoint is not None:
+#     icnn_couple.load_state_dict(torch.load(args.from_checkpoint))
+    
+n_epochs = 50
 noise_level = 0.05
 reg_param = 0.3
 stepsize = 0.01
-bsize=10
+bsize=2
 #%%
+# Train
 
-if __name__ == '__main__': 
-    if args.train:
-        icnn_fwd.train()
-        icnn_bwd.train()
-        opt_fwd = torch.optim.Adam(icnn_fwd.parameters(),lr=1e-5,betas=(0.9,0.99))
-        opt_bwd = torch.optim.Adam(icnn_bwd.parameters(),lr=1e-5,betas=(0.9,0.99))
-        train_dataloader = torch.utils.data.DataLoader(stl10_data, batch_size=bsize) # When training
+icnn_couple.train()
+opt = torch.optim.Adam(icnn_couple.parameters(),lr=1e-5,betas=(0.9,0.99))
+train_dataloader = torch.utils.data.DataLoader(stl10_data, batch_size=bsize) # When training
 
-        for epoch in range(n_epochs):
-            total_loss = 0
-            total_fwdbwd = 0
-            batch_loss = 0
-            batch_fwdbwd = 0
-            for idx, (batch_, _) in enumerate(train_dataloader):
-                # add gaussian noise
-                #batch = batch_.to(device)
-                #batch_noisy = batch + noise_level * torch.randn_like(batch)
-                batch_noisy_ = batch_ + noise_level * torch.randn_like(batch_)
-                batch_noisy = batch_noisy_.to(device)
-                def recon_err(img):
-                    #bs_img, c_img, h_img, w_img = img.size()
-                    tv_h = torch.pow(img[:,:,1:,:]-img[:,:,:-1,:], 2).sum()
-                    tv_w = torch.pow(img[:,:,:,1:]-img[:,:,:,:-1], 2).sum()
-                    tv = (tv_h+tv_w)
-                    fidelity = torch.pow(img-batch_noisy,2).sum()
-                    return (fidelity + reg_param*tv)/2
-                
-                def recon_err_grad(img):
-                    # laplacian = 4*img[:,:,1:-1,1:-1] - img[:,:,:-2,1:-1] - img[:,:,2:,1:-1] \
-                    #                                 - img[:,:,1:-1,2:]-img[:,:,1:-1,:-2]
-                    # laplacian = padder(laplacian)
-                    laplacian = F.conv2d(img, laplacian_weight, groups=3,padding='same')
-                    return img - batch_noisy + reg_param*laplacian
-                
-                fwd = batch_noisy
-                loss = 0
-                for i in range(10):
-                    fwdGrad = recon_err_grad(fwd)
-                    fwd = icnn_bwd(icnn_fwd(fwd) - stepsize*fwdGrad) 
-                    loss += recon_err(fwd)
-                #loss = recon_err(fwd)
-                closeness = torch.linalg.vector_norm(icnn_bwd(icnn_fwd(batch_noisy)) - batch_noisy, ord=1)
-                
-                err = loss+closeness
-                opt_fwd.zero_grad()
-                opt_bwd.zero_grad()
-                err.backward()
-                opt_fwd.step()
-                opt_bwd.step()
-                icnn_fwd.zero_clip_weights()
-                #icnn_bwd.zero_clip_weights()
-                
-                total_loss += err.item()
-                total_fwdbwd += closeness.item()
-                batch_loss += err.item()
-                batch_fwdbwd += closeness.item()
-                if(idx % args.num_batches == args.num_batches-1):
-                    avg_loss = batch_loss/args.num_batches/bsize
-                    avg_fwdbwd = batch_fwdbwd/args.num_batches/bsize
-                    print("loss", loss.item(), "closeness", closeness.item())
-                    train_log = "epoch:[{}/{}] batch:[{}/{}], avg_loss = {:.4f}, avg_fwdbwd = {:.4f}".\
-                      format(epoch+1, args.num_epochs, idx+1, len(train_dataloader), avg_loss, avg_fwdbwd)
-                    print(train_log)
-                    logger.info(train_log)
-                    batch_loss = 0
-                    batch_fwdbwd = 0
-                
-            print("Epoch", epoch, "total loss", total_loss, "fwdbwd", total_fwdbwd)
-            # Checkpoint
-            if (epoch%args.checkpoint_freq == args.checkpoint_freq-1):
-                torch.save(icnn_fwd.state_dict(), '/local/scratch/public/hyt35/ICNN-MD/ICNN-STL10/checkpoints/stackedloss/'+str(epoch+1)+'fwd_small')
-                torch.save(icnn_bwd.state_dict(), '/local/scratch/public/hyt35/ICNN-MD/ICNN-STL10/checkpoints/stackedloss/'+str(epoch+1)+'bwd_small')
-            # Log
-                logger.info("\n====epoch:[{}/{}], epoch_loss = {:.2f}, epoch_fwdbwd = {:.4f}====\n".format(epoch+1, args.num_epochs, total_loss, total_fwdbwd))
+for epoch in range(n_epochs):
+    total_loss = 0
+    total_fwdbwd = 0
+    batch_loss = 0
+    batch_fwdbwd = 0
+    for idx, (batch_, _) in enumerate(train_dataloader):
+        # add gaussian noise
+        #batch = batch_.to(device)
+        #batch_noisy = batch + noise_level * torch.randn_like(batch)
+        batch_noisy_ = batch_ + noise_level * torch.randn_like(batch_)
+        batch_noisy = batch_noisy_.to(device)
+        def recon_err(img):
+            #bs_img, c_img, h_img, w_img = img.size()
+            tv_h = torch.pow(img[:,:,1:,:]-img[:,:,:-1,:], 2).sum()
+            tv_w = torch.pow(img[:,:,:,1:]-img[:,:,:,:-1], 2).sum()
+            tv = (tv_h+tv_w)
+            fidelity = torch.pow(img-batch_noisy,2).sum()
+            return (fidelity + reg_param*tv)/2
+        
+        def recon_err_grad(img):
+            # laplacian = 4*img[:,:,1:-1,1:-1] - img[:,:,:-2,1:-1] - img[:,:,2:,1:-1] \
+            #                                 - img[:,:,1:-1,2:]-img[:,:,1:-1,:-2]
+            # laplacian = padder(laplacian)
+            # laplacian = F.conv2d(img, laplacian_weight, groups=3,padding='same')
+            # return img - batch_noisy + reg_param*laplacian
+            return autograd.grad(recon_err(img), img)[0]
+        
+        fwd = batch_noisy.requires_grad_()
+        loss = 0
+
+        for stepsize in icnn_couple.stepsize:
+            fwdGrad = recon_err_grad(fwd)
+            fwd = icnn_couple.bwd_model(icnn_couple.fwd_model(fwd) - stepsize*fwdGrad) 
+            loss += recon_err(fwd)
+        #loss = recon_err(fwd)
+        closeness = icnn_couple.fwdbwdloss(batch_noisy)
+        
+        err = loss+closeness
+        
+        opt.zero_grad()
+        err.backward()
+        opt.step()
+        
+        icnn_couple.clip_fwd()
+        #icnn_bwd.zero_clip_weights()
+        icnn_couple.clamp_stepsizes()
+        
+        
+        total_loss += err.item()
+        total_fwdbwd += closeness.item()
+        batch_loss += err.item()
+        batch_fwdbwd += closeness.item()
+        # if(idx % args.num_batches == args.num_batches-1):
+        #     avg_loss = batch_loss/args.num_batches/bsize
+        #     avg_fwdbwd = batch_fwdbwd/args.num_batches/bsize
+        #     print("loss", loss.item(), "closeness", closeness.item())
+        #     train_log = "epoch:[{}/{}] batch:[{}/{}], avg_loss = {:.4f}, avg_fwdbwd = {:.4f}".\
+        #       format(epoch+1, args.num_epochs, idx+1, len(train_dataloader), avg_loss, avg_fwdbwd)
+        #     print(train_log)
+        #     logger.info(train_log)
+        #     batch_loss = 0
+        #     batch_fwdbwd = 0
+        print("loss", loss.item(), "closeness", closeness.item())
+        
+    print("Epoch", epoch, "total loss", total_loss, "fwdbwd", total_fwdbwd)
+    # Checkpoint
+    # if (epoch%args.checkpoint_freq == args.checkpoint_freq-1):
+    #     torch.save(icnn_fwd.state_dict(), '/local/scratch/public/hyt35/ICNN-MD/ICNN-STL10/checkpoints/stackedloss/'+str(epoch+1)+'fwd_small')
+    #     torch.save(icnn_bwd.state_dict(), '/local/scratch/public/hyt35/ICNN-MD/ICNN-STL10/checkpoints/stackedloss/'+str(epoch+1)+'bwd_small')
+    # # Log
+    #     logger.info("\n====epoch:[{}/{}], epoch_loss = {:.2f}, epoch_fwdbwd = {:.4f}====\n".format(epoch+1, args.num_epochs, total_loss, total_fwdbwd))
 
 
-    else:
-        icnn_fwd.eval()
-        icnn_bwd.eval()
-        stl10_data_test = torchvision.datasets.STL10('./stl10', split='train', transform=torchvision.transforms.ToTensor(), folds=1)
-        test_dataloader = torch.utils.data.DataLoader(stl10_data_test, batch_size=1)
-        for batch_, _ in test_dataloader:
-            batch = batch_.to(device)
-            batch_noisy = batch + noise_level * torch.randn_like(batch, requires_grad = True)
+    # else:
+    #     icnn_fwd.eval()
+    #     icnn_bwd.eval()
+    #     stl10_data_test = torchvision.datasets.STL10('./stl10', split='train', transform=torchvision.transforms.ToTensor(), folds=1)
+    #     test_dataloader = torch.utils.data.DataLoader(stl10_data_test, batch_size=1)
+    #     for batch_, _ in test_dataloader:
+    #         batch = batch_.to(device)
+    #         batch_noisy = batch + noise_level * torch.randn_like(batch, requires_grad = True)
             
-            batch_noisy_ = batch_noisy.cpu().detach().numpy()
-            plt.figure()
-            plt.imshow(batch_[0,:,:,:].permute(1,2,0))
-            plt.figure()
-            plt.imshow(batch_noisy_[0,:,:,:].transpose(1,2,0))
+    #         batch_noisy_ = batch_noisy.cpu().detach().numpy()
+    #         plt.figure()
+    #         plt.imshow(batch_[0,:,:,:].permute(1,2,0))
+    #         plt.figure()
+    #         plt.imshow(batch_noisy_[0,:,:,:].transpose(1,2,0))
             
-            def recon_err(img):
-                #bs_img, c_img, h_img, w_img = img.size()
-                tv_h = torch.pow(img[:,:,1:,:]-img[:,:,:-1,:], 2).sum()
-                tv_w = torch.pow(img[:,:,:,1:]-img[:,:,:,:-1], 2).sum()
-                tv = (tv_h+tv_w)
-                fidelity = torch.pow(img-batch_noisy,2).sum()
-                return (fidelity + reg_param*tv)/2
+    #         def recon_err(img):
+    #             #bs_img, c_img, h_img, w_img = img.size()
+    #             tv_h = torch.pow(img[:,:,1:,:]-img[:,:,:-1,:], 2).sum()
+    #             tv_w = torch.pow(img[:,:,:,1:]-img[:,:,:,:-1], 2).sum()
+    #             tv = (tv_h+tv_w)
+    #             fidelity = torch.pow(img-batch_noisy,2).sum()
+    #             return (fidelity + reg_param*tv)/2
             
-            def recon_err_grad(img):
-                # laplacian = 4*img[:,:,1:-1,1:-1] - img[:,:,:-2,1:-1] - img[:,:,2:,1:-1] \
-                #                                 - img[:,:,1:-1,2:]-img[:,:,1:-1,:-2]
-                # laplacian = padder(laplacian)
-                laplacian = F.conv2d(img, laplacian_weight, groups=3,padding='same')
-                return img - batch_noisy + reg_param*laplacian
+    #         def recon_err_grad(img):
+    #             # laplacian = 4*img[:,:,1:-1,1:-1] - img[:,:,:-2,1:-1] - img[:,:,2:,1:-1] \
+    #             #                                 - img[:,:,1:-1,2:]-img[:,:,1:-1,:-2]
+    #             # laplacian = padder(laplacian)
+    #             laplacian = F.conv2d(img, laplacian_weight, groups=3,padding='same')
+    #             return img - batch_noisy + reg_param*laplacian
             
-            fwd = batch_noisy
+    #         fwd = batch_noisy
             
-            closeness = torch.linalg.vector_norm(icnn_bwd(icnn_fwd(batch_noisy))-batch_noisy)
-            print(closeness)
+    #         closeness = torch.linalg.vector_norm(icnn_bwd(icnn_fwd(batch_noisy))-batch_noisy)
+    #         print(closeness)
             
-            foo = icnn_fwd(fwd)
-            #foo = iresnet_model.inverse(fwd)
-            plt.figure()
-            plt.imshow(foo.cpu().detach().clone()[0,:,:,:].permute(1,2,0))
-            #del foo
-            bar = icnn_bwd(foo)
-            plt.figure()
-            plt.imshow(bar.cpu().detach().clone()[0,:,:,:].permute(1,2,0))
-            #del foo
+    #         foo = icnn_fwd(fwd)
+    #         #foo = iresnet_model.inverse(fwd)
+    #         plt.figure()
+    #         plt.imshow(foo.cpu().detach().clone()[0,:,:,:].permute(1,2,0))
+    #         #del foo
+    #         bar = icnn_bwd(foo)
+    #         plt.figure()
+    #         plt.imshow(bar.cpu().detach().clone()[0,:,:,:].permute(1,2,0))
+    #         #del foo
 
-            torch.cuda.empty_cache()
-            print("Initial recon err", recon_err(fwd).item())
-            ## MIRROR DESCENT
-            for i in range(25):
-                fwd = fwd.clamp(0,1)
-                fwd.requires_grad_()
-                fwdGrad0 = recon_err_grad(fwd).detach().clone()
-                fwd = icnn_bwd(icnn_fwd(fwd) - stepsize*fwdGrad0/5)
-                fwd_ = fwd.cpu().detach().numpy()
-                plt.figure()
-                plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
-                print("MD recon", recon_err(fwd).item())
+    #         torch.cuda.empty_cache()
+    #         print("Initial recon err", recon_err(fwd).item())
+    #         ## MIRROR DESCENT
+    #         for i in range(25):
+    #             fwd = fwd.clamp(0,1)
+    #             fwd.requires_grad_()
+    #             fwdGrad0 = recon_err_grad(fwd).detach().clone()
+    #             fwd = icnn_bwd(icnn_fwd(fwd) - stepsize*fwdGrad0/5)
+    #             fwd_ = fwd.cpu().detach().numpy()
+    #             plt.figure()
+    #             plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
+    #             print("MD recon", recon_err(fwd).item())
             
-            fwd = batch_noisy
-            ## GRADIENT DESCENT
-            for i in range(5):
-                fwd.requires_grad_()
-                fwdGrad0 = autograd.grad(recon_err(fwd), fwd)[0].detach()
-                #fwd = iresnet_model.inverse(icnn(fwd) - stepsize*fwdGrad0) + icnn(fwd) - stepsize*fwdGrad0
-                fwd = fwd - stepsize*fwdGrad0
-                #fwd = icnn(fwd)
-                print("GD recon", recon_err(fwd).item())
-                #fwd = (fwd-fwd.min())/(fwd.max()-fwd.min())
+    #         fwd = batch_noisy
+    #         ## GRADIENT DESCENT
+    #         for i in range(5):
+    #             fwd.requires_grad_()
+    #             fwdGrad0 = autograd.grad(recon_err(fwd), fwd)[0].detach()
+    #             #fwd = iresnet_model.inverse(icnn(fwd) - stepsize*fwdGrad0) + icnn(fwd) - stepsize*fwdGrad0
+    #             fwd = fwd - stepsize*fwdGrad0
+    #             #fwd = icnn(fwd)
+    #             print("GD recon", recon_err(fwd).item())
+    #             #fwd = (fwd-fwd.min())/(fwd.max()-fwd.min())
                 
-            fwd_ = fwd.cpu().detach().numpy()
-            #fwd_ = (fwd_-fwd_.min())/(fwd_.max()-fwd_.min())
-            plt.figure()
-            plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
-            break
+    #         fwd_ = fwd.cpu().detach().numpy()
+    #         #fwd_ = (fwd_-fwd_.min())/(fwd_.max()-fwd_.min())
+    #         plt.figure()
+    #         plt.imshow(fwd_[0,:,:,:].transpose(1,2,0))
+    #         break
 
 #%%
 # save "trained" model

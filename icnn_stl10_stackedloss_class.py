@@ -172,6 +172,8 @@ noise_level = 0.05
 reg_param = 0.3
 stepsize = 0.01
 bsize=2
+
+closeness_reg = 1
 #%%
 # Train
 
@@ -216,7 +218,7 @@ for epoch in range(n_epochs):
         #loss = recon_err(fwd)
         closeness = icnn_couple.fwdbwdloss(batch_noisy)
         
-        err = loss+closeness
+        err = loss+closeness*closeness_reg
         
         opt.zero_grad()
         err.backward()
@@ -244,6 +246,8 @@ for epoch in range(n_epochs):
         print("loss", loss.item(), "closeness", closeness.item())
         
     print("Epoch", epoch, "total loss", total_loss, "fwdbwd", total_fwdbwd)
+    if epoch % 50 == 49:
+        closeness_reg = closeness_reg*1.05
     # Checkpoint
     # if (epoch%args.checkpoint_freq == args.checkpoint_freq-1):
     #     torch.save(icnn_fwd.state_dict(), '/local/scratch/public/hyt35/ICNN-MD/ICNN-STL10/checkpoints/stackedloss/'+str(epoch+1)+'fwd_small')

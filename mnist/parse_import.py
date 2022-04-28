@@ -2,11 +2,11 @@ import argparse
 
 def create_parser():
     parser = argparse.ArgumentParser(description='Command Line Arguments')
-    parser.add_argument('--num_epochs', default=1500, type=int,
+    parser.add_argument('--num_epochs', default=10000, type=int,
                         help='number of epochs')
     parser.add_argument('--num_batches', default=10, type=int,
                         help='number of batches after which progress is displayed')
-    parser.add_argument('--checkpoint_freq', default=20, type=int,
+    parser.add_argument('--checkpoint_freq', default=200, type=int,
                         help='frequency of checkpointing')
     parser.add_argument('--from_checkpoint', default=None, type=str,
                         help='path of checkpoint to start from')

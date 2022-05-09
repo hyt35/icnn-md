@@ -92,22 +92,19 @@ class ICNN(nn.Module):
         #                          for i in range(self.n_layers+1)])
         
         self.wz = nn.ModuleList([
-                  nn.Linear(hidden,hidden,bias=False),
                   *[nn.Linear(hidden,hidden,bias=False) for _ in range(num_layers)],
-                  nn.Linear(hidden,in_dim,bias=False)
+                  nn.Linear(hidden,out_features = 1,bias=False)
           ])
-
         self.wx_quad = nn.ModuleList([
-                  nn.Linear(in_dim,hidden,bias=False),
                   *[nn.Linear(in_dim,hidden,bias=False) for _ in range(num_layers+1)],
-                  nn.Linear(in_dim,in_dim,bias=False)
+                  nn.Linear(in_dim,1,bias=False)
           ])
 
         self.wx_lin = nn.ModuleList([
-                  nn.Linear(in_dim,hidden,bias=True),
                   *[nn.Linear(in_dim,hidden,bias=True) for _ in range(num_layers+1)],
-                  nn.Linear(in_dim,in_dim,bias=True)
+                  nn.Linear(in_dim,1,bias=False)
           ])
+        
 
         #slope of leaky-relu
         self.negative_slope = 0.2 
@@ -115,10 +112,10 @@ class ICNN(nn.Module):
         
         
     def scalar(self, x):
-        z = torch.nn.functional.leaky_relu(self.wx_quad[0](x)**2 + self.wx_lin[0](x), negative_slope=self.negative_slope)
-        for layer in range(self.n_layers+1):
+        z = torch.nn.functional.leaky_relu(self.wx_quad[0](x)**2 + self.wx_lin[0](x), negative_slope=self.negative_slope) # initial z
+        for layer in range(self.n_layers-1):
             z = torch.nn.functional.leaky_relu(self.wz[layer](z) + self.wx_quad[layer+1](x)**2 + self.wx_lin[layer+1](x), negative_slope=self.negative_slope)
-
+        z = self.wz[-1](z) + self.wx_quad[-1](x)**2 + self.wx_lin[-1](x)
         return z
     
     def forward(self, x):
@@ -126,21 +123,16 @@ class ICNN(nn.Module):
         return (1-self.strong_convexity)*foo + self.strong_convexity*x
     
     #a weight initialization routine for the ICNN
-    def initialize_weights(self, min_val=0.0, max_val=0.001, device=device):
-        for layer in range(self.n_layers):
-            self.wz[layer+1].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.hidden).to(device)
-        self.wz[0].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.hidden).to(device)
-        self.wz[-1].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.in_dim).to(device)
+    def initialize_weights(self, mean=-4.0, std=0.1, device=device):
+        for core in self.wz:
+            core.weight.data.normal_(mean,std).exp_()
             
         return self
     
     #a zero clipping functionality for the ICNN (set negative weights to 0)
     def zero_clip_weights(self): 
-        for layer in range(self.n_layers):
-            self.wz[layer].weight.data.clamp_(0)
+        for core in self.wz:
+            core.weight.data.clamp_(0)
 
         return self 
 
@@ -202,7 +194,7 @@ dim = 500
 icnn_couple = ICNNCouple(stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1))
 icnn_couple.init_fwd(in_dim = dim, hidden = 128, num_layers=5, strong_convexity = 0.5)
 icnn_couple.fwd_model.initialize_weights()
-icnn_couple.init_bwd(in_dim = dim, hidden = 196, num_layers=5, strong_convexity = 1)
+icnn_couple.init_bwd(in_dim = dim, hidden = 196, num_layers=5, strong_convexity = 0.5)
 
 
 #%%

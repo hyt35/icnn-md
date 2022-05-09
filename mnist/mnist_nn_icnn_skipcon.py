@@ -18,8 +18,8 @@ import parse_import
 import torch.autograd as autograd
 device='cuda'
 
-checkpoint_path = '/local/scratch/public/hyt35/ICNN-MD/ICNN-ARTIFICIAL/checkpoints/svm_margin/'
-logging.basicConfig(filename=datetime.now().strftime('logs/%d-%m_%H:%M-svm_margin.log'), filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+checkpoint_path = '/local/scratch/public/hyt35/ICNN-MD/ICNN-ARTIFICIAL/checkpoints/nn_skip/'
+logging.basicConfig(filename=datetime.now().strftime('logs/%d-%m_%H:%M-nn_skip.log'), filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 mnist_data = torchvision.datasets.MNIST('/local/scratch/public/hyt35/datasets', train=True,
                              transform=torchvision.transforms.Compose([
@@ -29,13 +29,6 @@ mnist_data = torchvision.datasets.MNIST('/local/scratch/public/hyt35/datasets', 
                              ]))
 args=parse_import.parse_commandline_args()
 torch.cuda.set_device(1)
-classes=(4,9)
-
-mnist_data_filtered_idx = (mnist_data.targets == classes[0]) | (mnist_data.targets == classes[1])
-mnist_data.data, mnist_data.targets = mnist_data.data[mnist_data_filtered_idx], mnist_data.targets[mnist_data_filtered_idx]
-
-def gaussian_kernel(x,w):
-    return torch.exp(x[:,None]-w[None,:])
 
 class Net(nn.Module):
     def __init__(self):
@@ -99,22 +92,23 @@ class ICNN(nn.Module):
         #                          for i in range(self.n_layers+1)])
         
         self.wz = nn.ModuleList([
-                  nn.Linear(hidden,hidden,bias=False),
                   *[nn.Linear(hidden,hidden,bias=False) for _ in range(num_layers)],
-                  nn.Linear(hidden,in_dim,bias=False)
+                  nn.Linear(hidden,out_features = 1,bias=False)
           ])
-
+        self.wz_skip = nn.ModuleList([
+                  *[nn.Linear(hidden,hidden,bias=False) for _ in range(num_layers-1)],
+                  nn.Linear(hidden,1,bias=False)
+          ])
         self.wx_quad = nn.ModuleList([
-                  nn.Linear(in_dim,hidden,bias=False),
                   *[nn.Linear(in_dim,hidden,bias=False) for _ in range(num_layers+1)],
-                  nn.Linear(in_dim,in_dim,bias=False)
+                  nn.Linear(in_dim,1,bias=False)
           ])
 
         self.wx_lin = nn.ModuleList([
-                  nn.Linear(in_dim,hidden,bias=True),
                   *[nn.Linear(in_dim,hidden,bias=True) for _ in range(num_layers+1)],
-                  nn.Linear(in_dim,in_dim,bias=True)
+                  nn.Linear(in_dim,1,bias=False)
           ])
+        
 
         #slope of leaky-relu
         self.negative_slope = 0.2 
@@ -122,9 +116,17 @@ class ICNN(nn.Module):
         
         
     def scalar(self, x):
-        z = torch.nn.functional.leaky_relu(self.wx_quad[0](x)**2 + self.wx_lin[0](x), negative_slope=self.negative_slope)
-        for layer in range(self.n_layers+1):
-            z = torch.nn.functional.leaky_relu(self.wz[layer](z) + self.wx_quad[layer+1](x)**2 + self.wx_lin[layer+1](x), negative_slope=self.negative_slope)
+        z = torch.nn.functional.leaky_relu(self.wx_quad[0](x)**2 + self.wx_lin[0](x), negative_slope=self.negative_slope) # initial z
+        last_z = None
+        last_last_z = None
+        for layer in range(self.n_layers-1):
+            if last_last_z is None:
+                z = torch.nn.functional.leaky_relu(self.wz[layer](z) + self.wx_quad[layer+1](x)**2 + self.wx_lin[layer+1](x), negative_slope=self.negative_slope)
+            else:
+                z = torch.nn.functional.leaky_relu(self.wz_skip[layer-1](last_last_z) + self.wz[layer](z) + self.wx_quad[layer+1](x)**2 + self.wx_lin[layer+1](x), negative_slope=self.negative_slope)
+            last_last_z = last_z
+            last_z = z.clone()
+        z = self.wz_skip[-1](last_last_z) + self.wz[-1](z) + self.wx_quad[-1](x)**2 + self.wx_lin[-1](x)
 
         return z
     
@@ -133,22 +135,20 @@ class ICNN(nn.Module):
         return (1-self.strong_convexity)*foo + self.strong_convexity*x
     
     #a weight initialization routine for the ICNN
-    def initialize_weights(self, min_val=0.0, max_val=0.001, device=device):
-        for layer in range(self.n_layers):
-            self.wz[layer+1].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.hidden).to(device)
-        self.wz[0].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.hidden).to(device)
-        self.wz[-1].weight.data = min_val + (max_val - min_val)\
-            * torch.rand(self.hidden, self.in_dim).to(device)
-            
+    def initialize_weights(self, mean=-4.0, std=0.1, device=device):
+        for core in self.wz:
+            core.weight.data.normal_(mean,std).exp_()
+        for core in self.wz_skip:
+            core.weight.data.normal_(mean,std).exp_()
         return self
     
     #a zero clipping functionality for the ICNN (set negative weights to 0)
     def zero_clip_weights(self): 
-        for layer in range(self.n_layers):
-            self.wz[layer].weight.data.clamp_(0)
-
+        for core in self.wz:
+            core.weight.data.clamp_(0)
+        
+        for core in self.wz_skip:
+            core.weight.data.clamp_(0)
         return self 
 
 class ICNNCouple(nn.Module):
@@ -204,23 +204,18 @@ pre_net.eval()
 del network
 
 # Initialize models
-dim = 51
+dim = 500
 
 icnn_couple = ICNNCouple(stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1))
-icnn_couple.init_fwd(in_dim = dim, hidden = 64, num_layers=4, strong_convexity = 0.5)
+icnn_couple.init_fwd(in_dim = dim, hidden = 128, num_layers=5, strong_convexity = 0.5)
 icnn_couple.fwd_model.initialize_weights()
-icnn_couple.init_bwd(in_dim = dim, hidden = 96, num_layers=4, strong_convexity = 1)
-
-
-margin_loss = torch.nn.MultiMarginLoss()
-ones = torch.tensor(1)
-ones.requires_grad_(False)
+icnn_couple.init_bwd(in_dim = dim, hidden = 196, num_layers=5, strong_convexity = 0.5)
 
 
 #%%
 n_epochs = args.num_epochs
-dataset_size = 1000 # number of random class pair to extract
-bsize = 2000 # number of random SVM init
+dataset_size = 2000 # number of random class pair to extract
+bsize = 2000 # number of random final-layer init
 stepsize = 0.01
 icnn_couple.train()
 opt = torch.optim.Adam(icnn_couple.parameters(),lr=1e-5,betas=(0.9,0.99))
@@ -229,11 +224,9 @@ closeness_reg = 1.0
 closeness_update_nepochs = 50
 closeness_update_multi = 1.05
 
-ind1 = classes[0]
-ind2 = classes[1]
 
 train_dataloader = torch.utils.data.DataLoader(mnist_data, batch_size=dataset_size, shuffle=True)
-class_lossfn = torch.nn.MarginRankingLoss(reduction='sum', margin=1)
+class_lossfn = torch.nn.CrossEntropyLoss(reduction='sum')
 
 
 #ind1,ind2 = torch.randperm(10)[0:2]
@@ -243,41 +236,32 @@ for epoch in range(n_epochs):
       batch_loss = 0
       batch_fwdbwd = 0
       for idx, (data, target) in enumerate(train_dataloader):
-          data1 = data[target==ind1]
-          data2 = data[target==ind2]
-          len1 = len(data1)
-          len2 = len(data2)
 
-          target1 = torch.ones(data1.shape[0]) # 4 is positive
-          target2 = -torch.ones(data2.shape[0]) # 9 is negative
           
-          dat = torch.concat([data1, data2]).to(device) # (count,1,28,28), where count = dataset_size
-          targ = torch.concat([target1, target2]).repeat(bsize,1).T.to(device) # (count, bsize)
+          dat = data.to(device) # (count,1,28,28), where count = dataset_size
+          targ = target.repeat(bsize,1).to(device) # of size (bsize, count)
+          feat = pre_net(dat).to(device) # (count, 50), NN features
 
-          feat = pre_net(dat) # (count, 50), NN features
-
+          init_layer_mat = torch.randn(bsize, 50,10, requires_grad=True).to(device)
           # define objective functions
-          def svm_loss(wb):
-            w = wb[:,:-1] # (bsize, 50)
-            b = wb[:,-1] # (bsize)
-            skew = torch.inner(feat, w) + b # (count, bsize), probably
-            return torch.sum(w**2)/2 + 2*class_lossfn(skew.flatten(), torch.zeros_like(skew.flatten()), targ.flatten())/(bsize)
+          def nn_loss(layer_mat): # expected of size (C, 50, 10)
+            # layer mat is of size (bsize, 50,10)
+            # torch.matmul(feat, final_layer) returns of form (bsize, count, 10)
+            # cross entropy requires probabilities to be in dim 1 => transpose dim 1 and 2
+            return class_lossfn(torch.matmul(feat, layer_mat).permute(0,2,1), targ)
 
-          def svm_loss_grad(wb):
+          def nn_loss_grad(layer_mat):
             #wb = torch.hstack([w, b[:,None]])
-            return autograd.grad(svm_loss(wb), wb)[0]
-            
+            return autograd.grad(nn_loss(layer_mat), layer_mat)[0]
 
-          init_wb = torch.randn(bsize, 51, requires_grad=True).to(device) # initialize bsize number of random svm initialization
-
-          fwd = init_wb
+          fwd = init_layer_mat.flatten(1)
           loss = 0
           closeness = 0
           for stepsize in icnn_couple.stepsize:
               closeness += icnn_couple.fwdbwdloss(fwd)
-              fwdGrad = svm_loss_grad(fwd)
-              fwd = icnn_couple.bwd_model(icnn_couple.fwd_model(fwd) - stepsize*fwdGrad) 
-              loss += svm_loss(fwd)
+              fwdGrad = nn_loss_grad(fwd.reshape(bsize, 50,10))
+              fwd = icnn_couple.bwd_model(icnn_couple.fwd_model(fwd) - stepsize*fwdGrad.flatten(1)) 
+              loss += nn_loss(fwd.reshape(bsize, 50,10))
           #loss = recon_err(fwd)
           closeness += icnn_couple.fwdbwdloss(fwd)
           
@@ -291,9 +275,9 @@ for epoch in range(n_epochs):
           #icnn_bwd.zero_clip_weights()
           icnn_couple.clamp_stepsizes()
           
-          total_loss += loss.item()
+          total_loss += err.item()
           total_fwdbwd += closeness.item()
-          batch_loss += loss.item()
+          batch_loss += err.item()
           batch_fwdbwd += closeness.item()
           if(idx % args.num_batches == args.num_batches-1):
               avg_loss = batch_loss/args.num_batches/bsize

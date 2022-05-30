@@ -1,6 +1,6 @@
 # Data-Driven MD with ICNNs, 
  
-This is the code repository for the article "Data-Driven Mirror Descent with Input-Convex Neural Networks" by H.Y. Tan, S. Mukherjee, J. Tang, and C.B. Schönlieb. An arXiv version of the article can be found [here](https://www.arxiv.org).
+This is the code repository for the article "Data-Driven Mirror Descent with Input-Convex Neural Networks" by H.Y. Tan, S. Mukherjee, J. Tang, and C.-B. Schönlieb. An arXiv version of the article can be found [here](https://www.arxiv.org).
 
 ## Contents
 This repository contains the following:

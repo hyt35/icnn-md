@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from torch._C import LoggerBase
 import torch.nn as nn
 import torch.autograd as autograd
 import torchvision
@@ -33,7 +32,7 @@ class ICNN(nn.Module):
         self.imsize = imsize
         self.padding = (self.kernel_size-1)//2
         self.dense_size = dense_size
-        self.conv_filters=10
+        self.conv_filters=5
 
         #these layers should have non-negative weights
         self.wz = nn.ModuleList([nn.Conv2d(self.n_filters, self.n_filters, self.kernel_size, stride=1, padding=self.padding, padding_mode='circular', bias=False)\
@@ -47,11 +46,11 @@ class ICNN(nn.Module):
                                  for i in range(self.n_layers+1)])
         
         #one final conv layer with nonnegative weights
-        self.final_conv2d = nn.Conv2d(self.n_filters, self.conv_filters, self.kernel_size, stride=1, padding=self.padding, padding_mode='circular', bias=False)
+        self.final_conv2d = nn.Conv2d(self.n_filters, self.conv_filters, self.kernel_size, stride=2, padding=self.padding, padding_mode='circular', bias=False)
         
         # img size is 32x32
-        self.dense1 = nn.Linear(self.conv_filters*imsize, self.conv_filters*self.dense_size*2, bias=False)
-        self.dense2 = nn.Linear(self.conv_filters*self.dense_size*2, self.conv_filters*self.dense_size, bias=False)
+        self.dense1 = nn.Linear(self.conv_filters*imsize//(2**self.n_layers), self.conv_filters*self.dense_size//2, bias=False)
+        self.dense2 = nn.Linear(self.conv_filters*self.dense_size//2, self.conv_filters*self.dense_size//4, bias=False)
         #slope of leaky-relu
         self.negative_slope = 0.2 
         self.strong_convexity = strong_convexity
@@ -126,7 +125,7 @@ class ICNNCouple(nn.Module):
 
         fwd = x
         for ss in self.stepsize:
-            fwd = self.bwd_model(self.fwd_model(x) - ss*gradFun(fwd)) 
+            fwd = self.bwd_model(self.fwd_model(fwd) - ss*gradFun(fwd)) 
             iterates.append(fwd)
         return iterates
     
@@ -139,7 +138,7 @@ class ICNNCouple(nn.Module):
         return torch.linalg.vector_norm(self.bwd_model(self.fwd_model(x))-x, ord=1)
 
 class ICNNCoupleMomentum(nn.Module):
-    def __init__(self, device, imsize = 128*128, stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1)):
+    def __init__(self, device, imsize = 128*128, stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1), r=3, gamma=1):
         super(ICNNCoupleMomentum, self).__init__()
         self.fwd_model = None
         self.bwd_model = None
@@ -149,6 +148,8 @@ class ICNNCoupleMomentum(nn.Module):
         self.ssmax = stepsize_clamp[1]
         self.device = device
         self.imsize = imsize
+        self.r = r
+        self.gamma = gamma
         # Logger
         # Checkpoint
         

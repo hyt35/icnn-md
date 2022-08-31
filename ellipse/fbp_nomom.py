@@ -90,10 +90,8 @@ test_dataloader = torch.utils.data.DataLoader(dataset_validation, batch_size = b
 # Initialize models
 
 icnn_couple = ICNNCouple(device = device, stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1))
-icnn_couple.init_fwd(num_in_channels=1, num_filters=60, kernel_dim=3, num_layers=3, strong_convexity = 0.1, dense_size = 200)
-#icnn_couple.fwd_model.initialize_weights()
-icnn_couple.init_bwd(num_in_channels=1, num_filters=75, kernel_dim=3, num_layers=5, strong_convexity = 0.1, dense_size = 200)
-
+icnn_couple.init_fwd(num_in_channels=1, num_filters=60, kernel_dim=3, num_layers=2, strong_convexity = 0.1, dense_size = 20)
+icnn_couple.init_bwd(num_in_channels=1, num_filters=70, kernel_dim=3, num_layers=2, strong_convexity = 0.1, dense_size = 20)
 #%%
 logger.info("fwd params"+str( sum(p.numel() for p in icnn_couple.fwd_model.parameters())))
 logger.info("bwd params"+str( sum(p.numel() for p in icnn_couple.bwd_model.parameters())))

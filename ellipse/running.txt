@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=0 python fbp_nomom.py
+CUDA_VISIBLE_DEVICES=1 python fbp_mom.py

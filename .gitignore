@@ -1,0 +1,7 @@
+ellipse/fbp_mom
+ellipse/fbp_nomom
+ellipse/cache_ellipses_train_fbp.npy
+ellipse/cache_ellipses_validation_fbp.npy
+ellipse/checkpoints
+ellipse/deconv_mom
+ellipse/deconv_nomom

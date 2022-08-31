@@ -33,7 +33,7 @@ from torch.utils import tensorboard
 
 IMPL = 'astra_cuda'
 device = 'cuda:0'
-workdir = "/local/scratch/public/hyt35/icnn-md/ellipse/fbp_mom"
+workdir = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/fbp_mom"
 
 checkpoint_dir = os.path.join(workdir, "checkpoints")
 tb_dir = os.path.join(workdir, "tensorboard")

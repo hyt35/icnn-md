@@ -50,7 +50,7 @@ args=parse_import.parse_commandline_args()
 #%%
 # Initialize data
 
-bsize=200
+bsize=10
 
 
 dataset = get_standard_dataset('ellipses', impl=IMPL)
@@ -118,12 +118,12 @@ if __name__ == '__main__':
             total_fwdbwd = 0
             batch_loss = 0
             batch_fwdbwd = 0
-            for idx, (batch_, _) in enumerate(train_dataloader):
+            for idx, (batch_, gt_) in enumerate(train_dataloader):
                 # add gaussian noise
                 batch = batch_.to(device)
                 batch_noisy = batch + noise_level*torch.randn_like(batch) # 5% gaussian noise
                 fbp_batch_noisy = fbp_op(batch) # apply fbp to noisy
-
+                gt = gt_.to(device)
 
 
                 # define objective functions
@@ -153,7 +153,7 @@ if __name__ == '__main__':
                 #loss = recon_err(fwd)
                 closeness1 = icnn_couple.fwdbwdloss(fbp_batch_noisy)
                 closeness2 = icnn_couple.fwdbwdloss(fwd)
-                closeness3 = icnn_couple.fwdbwdloss(batch_.to(device))
+                closeness3 = icnn_couple.fwdbwdloss(gt)
 
                 err = loss+(closeness1+closeness2+closeness3)*closeness_reg
                 

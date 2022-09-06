@@ -120,13 +120,20 @@ class ICNNCouple(nn.Module):
     def forward(self, x, gradFun = None):
         if gradFun is None:
             raise RuntimeError("Gradient function not provided")
+        if self.training:
+            iterates = []
+            fwd = x
+            for ss in self.stepsize:
+                fwd = self.bwd_model(self.fwd_model(fwd) - ss*gradFun(fwd)) 
+                iterates.append(fwd)
+        else:
+            iterates = []
+            fwd = x
+            for ss in self.stepsize:
+                fwd = fwd.detach()
+                fwd = self.bwd_model(self.fwd_model(fwd) - ss*gradFun(fwd)) 
+                iterates.append(fwd.clone().detach())
 
-        iterates = []
-
-        fwd = x
-        for ss in self.stepsize:
-            fwd = self.bwd_model(self.fwd_model(fwd) - ss*gradFun(fwd)) 
-            iterates.append(fwd)
         return iterates
     
     def clamp_stepsizes(self):
@@ -174,21 +181,38 @@ class ICNNCoupleMomentum(nn.Module):
     def forward(self, x, gradFun = None):
         if gradFun is None:
             raise RuntimeError("Gradient function not provided")
+        if self.training:
+            iterates = []
+            xktilde = x.clone().detach()
+            zktilde = x.clone().detach()
+            xk = x.clone().detach()
+            currentstep = 1
+            for ss in self.stepsize:
+                zktilde = self.bwd_model(self.fwd_model(xk) - currentstep*ss*gradFun(xk)/self.r) 
+                xktilde = xk - self.gamma*ss*gradFun(xk) # gradient term with R = euclidean
+                lambdak = self.r/(self.r + currentstep)
 
-        iterates = []
-        xktilde = x.clone().detach()
-        zktilde = x.clone().detach()
-        xk = x.clone().detach()
-        currentstep = 1
-        for ss in self.stepsize:
-            zktilde = self.bwd_model(self.fwd_model(xk) - currentstep*ss*gradFun(xk)/self.r) 
-            xktilde = xk - self.gamma*ss*gradFun(xk) # gradient term with R = euclidean
-            lambdak = self.r/(self.r + currentstep)
+
+                xk = lambdak * zktilde + (1-lambdak) * xktilde
+                iterates.append(xk)
+                currentstep += 1
+
+        else:
+            iterates = []
+            xktilde = x.clone().detach()
+            zktilde = x.clone().detach()
+            xk = x.clone().detach()
+            currentstep = 1
+            for ss in self.stepsize:
+                xk = xk.detach()
+                zktilde = self.bwd_model(self.fwd_model(xk) - currentstep*ss*gradFun(xk)/self.r) 
+                xktilde = xk - self.gamma*ss*gradFun(xk) # gradient term with R = euclidean
+                lambdak = self.r/(self.r + currentstep)
 
 
-            xk = lambdak * zktilde + (1-lambdak) * xktilde
-            iterates.append(xk)
-            currentstep += 1
+                xk = lambdak * zktilde + (1-lambdak) * xktilde
+                iterates.append(xk.clone().detach())
+                currentstep += 1
         return iterates
     
     def clamp_stepsizes(self):

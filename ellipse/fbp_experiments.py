@@ -34,14 +34,15 @@ import time
 import scipy.optimize as spopt
 import odl
 from dival.datasets.standard import get_standard_dataset
-
+from torchvision.utils import make_grid, save_image
 #%% EXPERIMENT PARAMETERS
 IMPL = 'astra_cuda'
-#MODE = "ELLIPSE"
+# MODE = "ELLIPSE"
 MODE = "LODOPAB"
 EXPTYPE = "MAN" # experiment type 
-MAXITERS = 50 # maximum number of optim iter for experiments
+MAXITERS = 1000 # maximum number of optim iter for experiments
 PLOT = False # use the other script to plot.
+LONGTIME = True
 #%% EXPERIMENT FLAGS
 if EXPTYPE == "ALL":
     GRABNEW = True
@@ -53,12 +54,11 @@ if EXPTYPE == "ALL":
     
 else: # manual
     GRABNEW = False
-    COMPUTETRUEMIN = False
+    COMPUTETRUEMIN = True
     STEPSIZEEXT = False
     CONSTSS = False
-    MAPTRANSFER = True
+    MAPTRANSFER = False
     DOMAINCHANGE = False
-    
 
 #%% INITIALIZATION
 device0 = 'cuda:1'
@@ -72,12 +72,24 @@ checkpoint_dir_nomom = os.path.join(workdir_nomom, "checkpoints", "20")
 
 if MODE == "ELLIPSE":
     figs_dir = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/figs/ellipse"
+    datpath = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/datELLIPSE"
 else:
     figs_dir = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/figs/lodopab"
+    datpath = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/datLODOPAB"
 
+if LONGTIME:
+    datpath = datpath+"long"
 args=parse_import.parse_commandline_args()
 
-
+#%%
+# create subfolder
+tf.io.gfile.makedirs(datpath)
+tf.io.gfile.makedirs(os.path.join(datpath, "stepsizeext"))
+tf.io.gfile.makedirs(os.path.join(datpath, "constss"))
+tf.io.gfile.makedirs(os.path.join(datpath, "recipss"))
+tf.io.gfile.makedirs(os.path.join(datpath, "maptransfer"))
+tf.io.gfile.makedirs(os.path.join(datpath, "maptransfer", "standard"))
+tf.io.gfile.makedirs(os.path.join(datpath, "maptransfer", "switch"))
 #%%
 # Load models
 
@@ -168,12 +180,12 @@ if __name__ == '__main__':
 
             fbp_batch_noisy = resize_op(fbp_postprocess(fbp_op(batch))) # apply fbp to noisy
             break
-        torch.save(gt, os.path.join("dat" + MODE, MODE+"gt.pt"))
-        torch.save(fbp_batch_noisy, os.path.join("dat" + MODE, MODE+"batch.pt"))
+        torch.save(gt, os.path.join(datpath, MODE+"gt.pt"))
+        torch.save(fbp_batch_noisy, os.path.join(datpath, MODE+"batch.pt"))
         fbp_batch_noisy1 = fbp_batch_noisy.clone().to(device1)
     else:
-        gt = torch.load(os.path.join("dat" + MODE, MODE+"gt.pt"))
-        fbp_batch_noisy = torch.load(os.path.join("dat" + MODE, MODE+"batch.pt"))
+        gt = torch.load(os.path.join(datpath, MODE+"gt.pt"))
+        fbp_batch_noisy = torch.load(os.path.join(datpath, MODE+"batch.pt"))
         fbp_batch_noisy1 = fbp_batch_noisy.clone().to(device1)
 
     # define objective functions (on respective devices)
@@ -204,20 +216,42 @@ if __name__ == '__main__':
     #%%
     if COMPUTETRUEMIN:
         # perform lots of gd
-
+        gdloss = [init_err]
         fwd = fbp_batch_noisy.clone().detach().requires_grad_(True)
         for i in range(2000):
             fwd = fwd.detach().requires_grad_(True)
             fwdGrad = recon_err_grad(fwd)
-            fwd = fwd - 5e-3*fwdGrad
+            fwd = fwd - 5e-4*fwdGrad
+            gdloss.append(recon_err(fwd).item())
+        for i in range(5000):
+            fwd = fwd.detach().requires_grad_(True)
+            fwdGrad = recon_err_grad(fwd)
+            fwd = fwd - 5e-4*fwdGrad
+            gdloss.append(recon_err(fwd).item())
         # plot
         true_min = recon_err(fwd).item()
-        np.save(os.path.join("dat" + MODE, "true_min_val"), true_min)
-        np.save(os.path.join("dat" + MODE, "true_min_arr"), fwd.detach().cpu().numpy())
+        np.save(os.path.join(datpath, "true_gd_progression"), gdloss)
+        np.save(os.path.join(datpath, "true_min_val"), true_min)
+        np.save(os.path.join(datpath, "true_min_arr"), fwd.detach().cpu().numpy())
         print("compute true min", true_min)
+
+        nesterovloss = [init_err]
+        lam = 0
+        currentstep = 1
+        yk = fbp_batch_noisy.clone().detach().requires_grad_(True)
+        xk = yk
+        for i in range(1000):
+            yk = yk.detach().requires_grad_(True)
+            xklast = xk
+            xk = yk - 5e-4*recon_err_grad(yk)
+            yk = xk + i/(i+3)*(xk-xklast)
+
+            nesterovloss.append(recon_err(yk).item())
+
+        np.save(os.path.join(datpath, "nesterov_progression"), nesterovloss)
     
-    true_min = np.load(os.path.join("dat" + MODE, "true_min_val.npy"))
-    true_fwd = torch.from_numpy(np.load(os.path.join("dat" + MODE, "true_min_arr.npy"))).to(device0)
+    true_min = np.load(os.path.join(datpath, "true_min_val.npy"))
+    true_fwd = torch.from_numpy(np.load(os.path.join(datpath, "true_min_arr.npy"))).to(device0)
     true_fwd1 = true_fwd.clone().to(device1)
     init_l2 = torch.linalg.vector_norm(true_fwd - fbp_batch_noisy).item()
 
@@ -312,6 +346,8 @@ if __name__ == '__main__':
                 closeness_nomom.append(closeness)
                 l2_nomom.append(torch.linalg.vector_norm(true_fwd1 - i).item())
 
+            fwd_mom = iterates_mom[-1]
+            fwd_nomom = iterates_nomom[-1]
             # book keeping
             currminloss = torch.minimum(currminloss, torch.min(torch.cat((torch.Tensor(loss_mom), torch.Tensor(loss_nomom)))))
             currminfwdbwd = torch.minimum(currminfwdbwd, torch.min(torch.cat((torch.Tensor(closeness_mom), torch.Tensor(closeness_nomom)))))
@@ -321,12 +357,12 @@ if __name__ == '__main__':
             print(extend_type, "done, cumu time", currtime - start)
             # plot
 
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "loss_mom_" + extend_type), np.array(loss_mom))
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "loss_nomom_" + extend_type), np.array(loss_nomom))
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_mom_" + extend_type), np.array(closeness_mom))
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_nomom_" + extend_type), np.array(closeness_nomom))
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "l2_mom_" + extend_type), np.array(l2_mom))
-            np.save(os.path.join("dat" + MODE, "stepsizeext", "l2_nomom_" + extend_type), np.array(l2_nomom))
+            np.save(os.path.join(datpath, "stepsizeext", "loss_mom_" + extend_type), np.array(loss_mom))
+            np.save(os.path.join(datpath, "stepsizeext", "loss_nomom_" + extend_type), np.array(loss_nomom))
+            np.save(os.path.join(datpath, "stepsizeext", "fwdbwd_mom_" + extend_type), np.array(closeness_mom))
+            np.save(os.path.join(datpath, "stepsizeext", "fwdbwd_nomom_" + extend_type), np.array(closeness_nomom))
+            np.save(os.path.join(datpath, "stepsizeext", "l2_mom_" + extend_type), np.array(l2_mom))
+            np.save(os.path.join(datpath, "stepsizeext", "l2_nomom_" + extend_type), np.array(l2_nomom))
 
             if PLOT:
                 ax.plot(loss_mom, label = str(extend_type) + " mom")
@@ -334,16 +370,21 @@ if __name__ == '__main__':
 
                 ax2.plot(closeness_mom, label = str(extend_type) + " mom")
                 ax2.plot(closeness_nomom, label = str(extend_type) + " nomom")
-        if PLOT:
-            fig.suptitle("Loss")
-            fig2.suptitle("Fwdbwd error")
-            ax.set_ylim([currminloss.item()*0.95, init_err*5])
-            ax2.set_ylim([currminfwdbwd.item()*0.95, init_closeness_mom*5])
 
-            fig.legend()
-            fig2.legend() 
-            fig.savefig(os.path.join(figs_dir, "stepsize_ext_losses"))
-            fig2.savefig(os.path.join(figs_dir, "stepsize_ext_fwdbwd"))
+                with tf.io.gfile.GFile(os.path.join(figs_dir, "fwd_mom"+extend_type+".png"), "wb") as fout:
+                    save_image(fwd_mom.detach().cpu(), fout)
+                with tf.io.gfile.GFile(os.path.join(figs_dir,  "fwd_nomom"+extend_type+".png"), "wb") as fout:
+                    save_image(fwd_nomom.detach().cpu(), fout)
+        # if PLOT:
+        #     fig.suptitle("Loss")
+        #     fig2.suptitle("Fwdbwd error")
+        #     ax.set_ylim([currminloss.item()*0.95, init_err*5])
+        #     ax2.set_ylim([currminfwdbwd.item()*0.95, init_closeness_mom*5])
+
+        #     fig.legend()
+        #     fig2.legend() 
+        #     fig.savefig(os.path.join(figs_dir, "stepsize_ext_losses"))
+        #     fig2.savefig(os.path.join(figs_dir, "stepsize_ext_fwdbwd"))
         end = time.time()
         print("adaptive stepsize extension done, elapsed time", end-start)
 
@@ -384,12 +425,12 @@ if __name__ == '__main__':
                 l2_nomom.append(torch.linalg.vector_norm(true_fwd1 - i).item())
 
             # save
-            np.save(os.path.join("dat" + MODE, "constss", "loss_mom_" + str(c*1000)), np.array(loss_mom))
-            np.save(os.path.join("dat" + MODE, "constss", "loss_nomom_" + str(c*1000)), np.array(loss_nomom))
-            np.save(os.path.join("dat" + MODE, "constss", "fwdbwd_mom_" + str(c*1000)), np.array(closeness_mom))
-            np.save(os.path.join("dat" + MODE, "constss", "fwdbwd_nomom_" + str(c*1000)), np.array(closeness_nomom))
-            np.save(os.path.join("dat" + MODE, "constss", "l2_mom_" + str(c*1000)), np.array(l2_mom))
-            np.save(os.path.join("dat" + MODE, "constss", "l2_nomom_" + str(c*1000)), np.array(l2_nomom))
+            np.save(os.path.join(datpath, "constss", "loss_mom_" + str(c*1000)), np.array(loss_mom))
+            np.save(os.path.join(datpath, "constss", "loss_nomom_" + str(c*1000)), np.array(loss_nomom))
+            np.save(os.path.join(datpath, "constss", "fwdbwd_mom_" + str(c*1000)), np.array(closeness_mom))
+            np.save(os.path.join(datpath, "constss", "fwdbwd_nomom_" + str(c*1000)), np.array(closeness_nomom))
+            np.save(os.path.join(datpath, "constss", "l2_mom_" + str(c*1000)), np.array(l2_mom))
+            np.save(os.path.join(datpath, "constss", "l2_nomom_" + str(c*1000)), np.array(l2_nomom))
         # TYPE 2: t_k = c/n
         for c in [0.1,0.08,0.05,0.02,0.01]:
             new_stepsizes = c/torch.arange(start=1, end=MAXITERS+1)
@@ -423,12 +464,12 @@ if __name__ == '__main__':
                 l2_nomom.append(torch.linalg.vector_norm(true_fwd1 - i).item())
 
             # save
-            np.save(os.path.join("dat" + MODE, "recipss", "loss_mom_" + str(c*1000)), np.array(loss_mom))
-            np.save(os.path.join("dat" + MODE, "recipss", "loss_nomom_" + str(c*1000)), np.array(loss_nomom))
-            np.save(os.path.join("dat" + MODE, "recipss", "fwdbwd_mom_" + str(c*1000)), np.array(closeness_mom))
-            np.save(os.path.join("dat" + MODE, "recipss", "fwdbwd_nomom_" + str(c*1000)), np.array(closeness_nomom))
-            np.save(os.path.join("dat" + MODE, "recipss", "l2_mom_" + str(c*1000)), np.array(l2_mom))
-            np.save(os.path.join("dat" + MODE, "recipss", "l2_nomom_" + str(c*1000)), np.array(l2_nomom))
+            np.save(os.path.join(datpath, "recipss", "loss_mom_" + str(c*1000)), np.array(loss_mom))
+            np.save(os.path.join(datpath, "recipss", "loss_nomom_" + str(c*1000)), np.array(loss_nomom))
+            np.save(os.path.join(datpath, "recipss", "fwdbwd_mom_" + str(c*1000)), np.array(closeness_mom))
+            np.save(os.path.join(datpath, "recipss", "fwdbwd_nomom_" + str(c*1000)), np.array(closeness_nomom))
+            np.save(os.path.join(datpath, "recipss", "l2_mom_" + str(c*1000)), np.array(l2_mom))
+            np.save(os.path.join(datpath, "recipss", "l2_nomom_" + str(c*1000)), np.array(l2_nomom))
         end = time.time()
         print("constant ss done, elapsed time", end-start)
     #%%
@@ -462,12 +503,12 @@ if __name__ == '__main__':
             closeness_nomom.append(closeness)
             l2_nomom.append(torch.linalg.vector_norm(true_fwd1 - i).item())
 
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "loss_mom"), np.array(loss_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "loss_nomom"), np.array(loss_nomom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "fwdbwd_mom"), np.array(closeness_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "fwdbwd_nomom"), np.array(closeness_nomom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "l2_mom"), np.array(l2_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "standard", "l2_nomom"), np.array(l2_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "loss_mom"), np.array(loss_mom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "loss_nomom"), np.array(loss_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "fwdbwd_mom"), np.array(closeness_mom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "fwdbwd_nomom"), np.array(closeness_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "l2_mom"), np.array(l2_mom))
+        np.save(os.path.join(datpath, "maptransfer", "standard", "l2_nomom"), np.array(l2_nomom))
         
         # Redefine icnn with opposite map
         icnn_couple_mom = ICNNCoupleMomentum(device = device0, stepsize_init = 0.01, num_iters = 10, stepsize_clamp = (0.001,0.1))
@@ -510,12 +551,12 @@ if __name__ == '__main__':
             closeness_nomom.append(closeness)
             l2_nomom.append(torch.linalg.vector_norm(true_fwd1 - i).item())
 
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "loss_mom"), np.array(loss_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "loss_nomom"), np.array(loss_nomom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "fwdbwd_mom"), np.array(closeness_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "fwdbwd_nomom"), np.array(closeness_nomom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "l2_mom"), np.array(l2_mom))
-        np.save(os.path.join("dat" + MODE, "maptransfer", "switch", "l2_nomom"), np.array(l2_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "loss_mom"), np.array(loss_mom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "loss_nomom"), np.array(loss_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "fwdbwd_mom"), np.array(closeness_mom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "fwdbwd_nomom"), np.array(closeness_nomom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "l2_mom"), np.array(l2_mom))
+        np.save(os.path.join(datpath, "maptransfer", "switch", "l2_nomom"), np.array(l2_nomom))
 
         print("map transfer done")
 

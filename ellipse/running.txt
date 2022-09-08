@@ -1,5 +1,15 @@
 CUDA_VISIBLE_DEVICES=0 python fbp_nomom.py
 CUDA_VISIBLE_DEVICES=1 python fbp_mom.py
 
+CUDA_VISIBLE_DEVICES=0 python deconv_nomom.py
+CUDA_VISIBLE_DEVICES=1 python deconv_mom.py
+
+
 python fbp_loss_comparison.py
 python fbp_lodopab_compar.py
+
+create dataset:
+python fbp_experiments.py
+
+create plot:
+python fbp_experiments_plotter.py

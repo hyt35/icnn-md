@@ -9,3 +9,5 @@ ellipse/cache_lodopab_train_fbp.npy
 ellipse/cache_lodopab_validation_fbp.npy
 ellipse/datELLIPSE
 ellipse/datLODOPAB
+ellipse/datELLIPSElong
+ellipse/datLODOPABlong

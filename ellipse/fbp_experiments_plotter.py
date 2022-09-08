@@ -43,11 +43,11 @@ from dival.util.constants import MU_MAX
 
 #%% EXPERIMENT PARAMETERS
 IMPL = 'astra_cuda'
-#MODE = "ELLIPSE"
+# MODE = "ELLIPSE"
 MODE = "LODOPAB"
-EXPTYPE = "ALL" # experiment type 
-MAXITERS = 50 # maximum number of optim iter for experiments
-
+EXPTYPE = "MAN" # experiment type 
+LONGTIME = True
+MOMSPLIT = False
 eps=1e-6
 #%% EXPERIMENT FLAGS
 if EXPTYPE == "ALL":
@@ -57,9 +57,9 @@ if EXPTYPE == "ALL":
     DOMAINCHANGE = True
     
 else: # manual
-    STEPSIZEEXT = False
-    CONSTSS = False
-    MAPTRANSFER = True
+    STEPSIZEEXT = True
+    CONSTSS = True
+    MAPTRANSFER = False
     DOMAINCHANGE = False
     
 
@@ -71,16 +71,23 @@ workdir_mom = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/fbp_mom"
 workdir_nomom = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/fbp_nomom"
 
 checkpoint_dir_mom = os.path.join(workdir_mom, "checkpoints", "20")
-checkpoint_dir_nomom = os.path.join(workdir_nomom, "checkpoints", "15")
+checkpoint_dir_nomom = os.path.join(workdir_nomom, "checkpoints", "20")
 
 if MODE == "ELLIPSE":
     figs_dir = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/figs/ellipse"
+    datpath = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/datELLIPSE"
 else:
     figs_dir = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/figs/lodopab"
+    datpath = "/local/scratch/public/hyt35/icnn-md-mom/ellipse/datLODOPAB"
 
+if LONGTIME:
+    figs_dir = figs_dir + "_longtime"
+    datpath = datpath+"long"
 args=parse_import.parse_commandline_args()
-true_min = np.load(os.path.join("dat" + MODE, "true_min_val.npy"))
-
+true_min = np.load(os.path.join(datpath, "true_min_val.npy"))
+gdloss = np.load(os.path.join(datpath, "true_gd_progression.npy"))
+#gdloss_recip = np.load(os.path.join(datpath, "recip_gd_progression.npy"))
+nesterovloss = np.load(os.path.join(datpath, "nesterov_progression.npy"))
 if STEPSIZEEXT:
     # Experiment: step size extension with different extension methods.
     start = time.time()
@@ -89,6 +96,11 @@ if STEPSIZEEXT:
     fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
     fig3, ax3 = plt.subplots(figsize = (8,6), dpi = 150) # log-loss plot 
     ax3.set_yscale('log')
+    if LONGTIME:
+        ax3.set_xscale('log')
+        ax3.set_xlim(right = 10**3)
+    ax3.plot(gdloss[:10**3]- true_min + eps, color='k', label = 'gd')
+    ax3.plot(nesterovloss[:10**3]- true_min + eps, color='maroon', label = 'nesterov')
     fig4, ax4 = plt.subplots(figsize = (8,6), dpi = 150) # l2 distance to minimum
     # bookkeeping: find minimum loss and fwdbwd
     # currminloss = None
@@ -100,17 +112,39 @@ if STEPSIZEEXT:
     ax.axhline(true_min, label = "true min", linestyle = '--')
     #ax3.axhline(true_min, label = "true min", linestyle = '--')
     print(true_min)
+    # for extend_type in ["max", "mean", "min", "final", "recip"]:
+    #     loss_mom = np.load(os.path.join(datpath, "stepsizeext", "loss_mom_" + extend_type + ".npy"))
+    #     loss_nomom = np.load(os.path.join(datpath, "stepsizeext", "loss_nomom_" + extend_type + ".npy"))
+    #     closeness_mom = np.load(os.path.join(datpath, "stepsizeext", "fwdbwd_mom_" + extend_type + ".npy"))
+    #     closeness_nomom = np.load(os.path.join(datpath, "stepsizeext", "fwdbwd_nomom_" + extend_type + ".npy"))
+    #     l2_mom = np.load(os.path.join(datpath, "stepsizeext", "l2_mom_" + extend_type + ".npy"))
+    #     l2_nomom = np.load(os.path.join(datpath, "stepsizeext", "l2_nomom_" + extend_type + ".npy"))
+    #     # if currminloss is None:
+    #     #     currminloss = np.amin(np.concatenate((loss_mom, loss_nomom)))
+    #     # else:
+    #     #     currminloss = np.amin((currminloss, np.amin(np.concatenate((loss_mom, loss_nomom)))))
+    #     if currminfwdbwd is None:
+    #         currminfwdbwd = np.amin(np.concatenate((closeness_mom, closeness_nomom)))
+    #     else:
+    #         currminfwdbwd = np.amin((currminfwdbwd, np.amin(np.concatenate((closeness_mom, closeness_nomom)))))
+    #     if init_err is None:
+    #         init_err = loss_mom[0]
+    #     if init_closeness_mom is None:
+    #         init_closeness_mom = closeness_mom[0]
+    #     if init_l2 is None:
+    #         init_l2 = l2_mom[0]
+    #     break
+
+    # loop 2: now plot.
     for extend_type in ["max", "mean", "min", "final", "recip"]:
-        loss_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "loss_mom_" + extend_type + ".npy"))
-        loss_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "loss_nomom_" + extend_type + ".npy"))
-        closeness_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_mom_" + extend_type + ".npy"))
-        closeness_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_nomom_" + extend_type + ".npy"))
-        l2_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "l2_mom_" + extend_type + ".npy"))
-        l2_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "l2_nomom_" + extend_type + ".npy"))
-        # if currminloss is None:
-        #     currminloss = np.amin(np.concatenate((loss_mom, loss_nomom)))
-        # else:
-        #     currminloss = np.amin((currminloss, np.amin(np.concatenate((loss_mom, loss_nomom)))))
+        loss_mom = np.load(os.path.join(datpath, "stepsizeext", "loss_mom_" + extend_type + ".npy"))
+        loss_nomom = np.load(os.path.join(datpath, "stepsizeext", "loss_nomom_" + extend_type + ".npy"))
+        closeness_mom = np.load(os.path.join(datpath, "stepsizeext", "fwdbwd_mom_" + extend_type + ".npy"))
+        closeness_nomom = np.load(os.path.join(datpath, "stepsizeext", "fwdbwd_nomom_" + extend_type + ".npy"))
+        l2_mom = np.load(os.path.join(datpath, "stepsizeext", "l2_mom_" + extend_type + ".npy"))
+        l2_nomom = np.load(os.path.join(datpath, "stepsizeext", "l2_nomom_" + extend_type + ".npy"))
+
+
         if currminfwdbwd is None:
             currminfwdbwd = np.amin(np.concatenate((closeness_mom, closeness_nomom)))
         else:
@@ -121,16 +155,6 @@ if STEPSIZEEXT:
             init_closeness_mom = closeness_mom[0]
         if init_l2 is None:
             init_l2 = l2_mom[0]
-        break
-
-    # loop 2: now plot.
-    for extend_type in ["max", "mean", "min", "final", "recip"]:
-        loss_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "loss_mom_" + extend_type + ".npy"))
-        loss_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "loss_nomom_" + extend_type + ".npy"))
-        closeness_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_mom_" + extend_type + ".npy"))
-        closeness_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "fwdbwd_nomom_" + extend_type + ".npy"))
-        l2_mom = np.load(os.path.join("dat" + MODE, "stepsizeext", "l2_mom_" + extend_type + ".npy"))
-        l2_nomom = np.load(os.path.join("dat" + MODE, "stepsizeext", "l2_nomom_" + extend_type + ".npy"))
 
         ax.plot(loss_mom, label = str(extend_type) + " mom", marker = 'o')
         ax.plot(loss_nomom, label = str(extend_type) + " nomom", marker = 'x')
@@ -173,19 +197,28 @@ if CONSTSS:
     fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
     fig3, ax3 = plt.subplots(figsize = (8,6), dpi = 150) # log-loss plot 
     ax3.set_yscale('log')
+    if LONGTIME:
+        ax3.set_xscale('log')
+        ax3.set_xlim(right = 10**3)
+    ax3.plot(gdloss[:10**3]- true_min + eps, color='k', label = 'gd')
+    ax3.plot(nesterovloss[:10**3]- true_min + eps, color='maroon', label = 'nesterov')
     fig4, ax4 = plt.subplots(figsize = (8,6), dpi = 150) # l2 distance to minimum
+
+    ax.axhline(true_min, label = "true min", linestyle = '--')
+
+
     init_err = None
     init_closeness_mom = None
     init_l2 = None
     # TYPE 1: t_k = c
     for c in [0.1,0.05,0.01,0.005,0.001]:
         # load
-        loss_mom = np.load(os.path.join("dat" + MODE, "constss", "loss_mom_" + str(c*1000) + ".npy"))
-        loss_nomom = np.load(os.path.join("dat" + MODE, "constss", "loss_nomom_" + str(c*1000) + ".npy"))
-        closeness_mom = np.load(os.path.join("dat" + MODE, "constss", "fwdbwd_mom_" + str(c*1000) + ".npy"))
-        closeness_nomom = np.load(os.path.join("dat" + MODE, "constss", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
-        l2_mom = np.load(os.path.join("dat" + MODE, "constss", "l2_mom_" + str(c*1000) + ".npy"))
-        l2_nomom = np.load(os.path.join("dat" + MODE, "constss", "l2_nomom_" + str(c*1000) + ".npy"))
+        loss_mom = np.load(os.path.join(datpath, "constss", "loss_mom_" + str(c*1000) + ".npy"))
+        loss_nomom = np.load(os.path.join(datpath, "constss", "loss_nomom_" + str(c*1000) + ".npy"))
+        closeness_mom = np.load(os.path.join(datpath, "constss", "fwdbwd_mom_" + str(c*1000) + ".npy"))
+        closeness_nomom = np.load(os.path.join(datpath, "constss", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
+        l2_mom = np.load(os.path.join(datpath, "constss", "l2_mom_" + str(c*1000) + ".npy"))
+        l2_nomom = np.load(os.path.join(datpath, "constss", "l2_nomom_" + str(c*1000) + ".npy"))
 
         if init_err is None:
             init_err = loss_mom[0]
@@ -226,15 +259,29 @@ if CONSTSS:
     fig3.savefig(os.path.join(figs_dir, "constss_loglosses"))
     fig4.savefig(os.path.join(figs_dir, "constss_l2totrue"))
 
+    fig, ax = plt.subplots(figsize = (8,6), dpi = 150) # loss plot
+    fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
+    fig3, ax3 = plt.subplots(figsize = (8,6), dpi = 150) # log-loss plot 
+    ax3.set_yscale('log')
+    if LONGTIME:
+        ax3.set_xscale('log')
+        ax3.set_xlim(right = 10**3)
+    ax3.plot(gdloss[:10**3]- true_min + eps, color='k', label = 'gd')
+    ax3.plot(nesterovloss[:10**3]- true_min + eps, color='maroon', label = 'nesterov')
+    fig4, ax4 = plt.subplots(figsize = (8,6), dpi = 150) # l2 distance to minimum
+
+    ax.axhline(true_min, label = "true min", linestyle = '--')
+
+
     # TYPE 2: t_k = c/n
     for c in [0.1,0.08,0.05,0.02,0.01]:
         # load
-        loss_mom = np.load(os.path.join("dat" + MODE, "recipss", "loss_mom_" + str(c*1000) + ".npy"))
-        loss_nomom = np.load(os.path.join("dat" + MODE, "recipss", "loss_nomom_" + str(c*1000) + ".npy"))
-        closeness_mom = np.load(os.path.join("dat" + MODE, "recipss", "fwdbwd_mom_" + str(c*1000) + ".npy"))
-        closeness_nomom = np.load(os.path.join("dat" + MODE, "recipss", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
-        l2_mom = np.load(os.path.join("dat" + MODE, "recipss", "l2_mom_" + str(c*1000) + ".npy"))
-        l2_nomom = np.load(os.path.join("dat" + MODE, "recipss", "l2_nomom_" + str(c*1000) + ".npy"))        
+        loss_mom = np.load(os.path.join(datpath, "recipss", "loss_mom_" + str(c*1000) + ".npy"))
+        loss_nomom = np.load(os.path.join(datpath, "recipss", "loss_nomom_" + str(c*1000) + ".npy"))
+        closeness_mom = np.load(os.path.join(datpath, "recipss", "fwdbwd_mom_" + str(c*1000) + ".npy"))
+        closeness_nomom = np.load(os.path.join(datpath, "recipss", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
+        l2_mom = np.load(os.path.join(datpath, "recipss", "l2_mom_" + str(c*1000) + ".npy"))
+        l2_nomom = np.load(os.path.join(datpath, "recipss", "l2_nomom_" + str(c*1000) + ".npy"))        
         ax.plot(loss_mom, label = str(c) + " mom", marker = 'o')
         ax.plot(loss_nomom, label = str(c) + " nomom", marker = 'x')
 
@@ -274,15 +321,22 @@ if MAPTRANSFER:
     fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
     fig3, ax3 = plt.subplots(figsize = (8,6), dpi = 150) # log-loss plot 
     ax3.set_yscale('log')
+    if LONGTIME:
+        ax3.set_xscale('log')
+        ax3.set_xlim(right = 10**3)
+    ax3.plot(gdloss[:10**3]- true_min + eps, color='k', label = 'gd')
+    ax3.plot(nesterovloss[:10**3]- true_min + eps, color='maroon', label = 'nesterov')
     fig4, ax4 = plt.subplots(figsize = (8,6), dpi = 150) # l2 distance to minimum
+    ax.axhline(true_min, label = "true min", linestyle = '--')
+
 
     # load standard
-    loss_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "loss_mom.npy"))
-    loss_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "loss_nomom.npy"))
-    closeness_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "fwdbwd_mom.npy"))
-    closeness_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "fwdbwd_nomom.npy"))
-    l2_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "l2_mom.npy"))
-    l2_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "standard", "l2_nomom.npy"))
+    loss_mom = np.load(os.path.join(datpath, "maptransfer", "standard", "loss_mom.npy"))
+    loss_nomom = np.load(os.path.join(datpath, "maptransfer", "standard", "loss_nomom.npy"))
+    closeness_mom = np.load(os.path.join(datpath, "maptransfer", "standard", "fwdbwd_mom.npy"))
+    closeness_nomom = np.load(os.path.join(datpath, "maptransfer", "standard", "fwdbwd_nomom.npy"))
+    l2_mom = np.load(os.path.join(datpath, "maptransfer", "standard", "l2_mom.npy"))
+    l2_nomom = np.load(os.path.join(datpath, "maptransfer", "standard", "l2_nomom.npy"))
 
     # define useful constants
     init_err = loss_mom[0]
@@ -306,12 +360,12 @@ if MAPTRANSFER:
     ax4.plot(l2_nomom, label = "nomom", marker = 'x')
 
     # load switched
-    loss_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "loss_mom.npy"))
-    loss_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "loss_nomom.npy"))
-    closeness_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "fwdbwd_mom.npy"))
-    closeness_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "fwdbwd_nomom.npy"))
-    l2_mom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "l2_mom.npy"))
-    l2_nomom = np.load(os.path.join("dat" + MODE, "maptransfer", "switch", "l2_nomom.npy"))
+    loss_mom = np.load(os.path.join(datpath, "maptransfer", "switch", "loss_mom.npy"))
+    loss_nomom = np.load(os.path.join(datpath, "maptransfer", "switch", "loss_nomom.npy"))
+    closeness_mom = np.load(os.path.join(datpath, "maptransfer", "switch", "fwdbwd_mom.npy"))
+    closeness_nomom = np.load(os.path.join(datpath, "maptransfer", "switch", "fwdbwd_nomom.npy"))
+    l2_mom = np.load(os.path.join(datpath, "maptransfer", "switch", "l2_mom.npy"))
+    l2_nomom = np.load(os.path.join(datpath, "maptransfer", "switch", "l2_nomom.npy"))
 
     # plot
     ax.plot(loss_mom, label = "mom switch", marker = '^')

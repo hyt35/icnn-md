@@ -1,8 +1,8 @@
 CUDA_VISIBLE_DEVICES=0 python fbp_nomom.py
 CUDA_VISIBLE_DEVICES=1 python fbp_mom.py
 
-CUDA_VISIBLE_DEVICES=0 python deconv_nomom.py
-CUDA_VISIBLE_DEVICES=1 python deconv_mom.py
+CUDA_VISIBLE_DEVICES=2 python deconv_nomom.py
+CUDA_VISIBLE_DEVICES=3 python deconv_mom.py
 
 
 python fbp_loss_comparison.py

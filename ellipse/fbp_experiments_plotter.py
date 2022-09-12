@@ -55,13 +55,16 @@ if EXPTYPE == "ALL":
     CONSTSS = True
     MAPTRANSFER = True
     DOMAINCHANGE = True
+    ALTTRANSFORM = True
+    DECONV = True
     
 else: # manual
     STEPSIZEEXT = True
-    CONSTSS = True
+    CONSTSS = False
     MAPTRANSFER = False
     DOMAINCHANGE = False
-    
+    ALTTRANSFORM = True
+    DECONV = True
 
 #%% INITIALIZATION
 device0 = 'cuda:1'
@@ -83,6 +86,9 @@ else:
 if LONGTIME:
     figs_dir = figs_dir + "_longtime"
     datpath = datpath+"long"
+#%%
+tf.io.gfile.makedirs(figs_dir)
+#%%
 args=parse_import.parse_commandline_args()
 true_min = np.load(os.path.join(datpath, "true_min_val.npy"))
 gdloss = np.load(os.path.join(datpath, "true_gd_progression.npy"))
@@ -406,3 +412,84 @@ if MAPTRANSFER:
 if DOMAINCHANGE:
     print("domain change todo")
 
+if ALTTRANSFORM:
+    fig, ax = plt.subplots(figsize = (8,6), dpi = 150) # loss plot
+    fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
+    
+    MAXITERS = 200
+    # TYPE 2: t_k = c/n
+    for c in [0.1,0.08,0.05,0.02,0.01]:
+        loss_mom = np.load(os.path.join(datpath, "alttransform", "loss_mom_" + str(c*1000) + ".npy"))
+        loss_nomom = np.load(os.path.join(datpath, "alttransform", "loss_nomom_" + str(c*1000) + ".npy"))
+        closeness_mom = np.load(os.path.join(datpath, "alttransform", "fwdbwd_mom_" + str(c*1000) + ".npy"))
+        closeness_nomom = np.load(os.path.join(datpath, "alttransform", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
+        # l2_mom = np.load(os.path.join(datpath, "alttransform", "l2_mom_" + str(c*1000) + ".npy"))
+        # l2_nomom = np.load(os.path.join(datpath, "alttransform", "l2_nomom_" + str(c*1000) + ".npy"))
+        init_err = loss_mom[0]
+
+        ax.plot(loss_mom, label = str(c) + " mom", marker = 'o')
+        ax.plot(loss_nomom, label = str(c) + " nomom", marker = 'x')
+
+        ax2.plot(closeness_mom, label = str(c) + " mom", marker = 'o')
+        ax2.plot(closeness_nomom, label = str(c) + " nomom", marker = 'x')
+
+        # ax4.plot(l2_mom, label = str(c) + " mom", marker = 'o')
+        # ax4.plot(l2_nomom, label = str(c) + " nomom", marker = 'x')
+
+    fig.suptitle("Loss")
+    fig2.suptitle("Fwdbwd error")
+    # fig4.suptitle("L2 distance to true min")
+
+    ax.set_ylim([init_err*0.1, init_err*1.1])
+    ax2.set_ylim([currminfwdbwd.item()*0.95, init_closeness_mom*1.5])
+    # ax4.set_ylim([0,init_l2*1.5])
+
+    fig.legend()
+    fig2.legend() 
+    # fig4.legend()
+    fig.savefig(os.path.join(figs_dir, "alttrans_losses"))
+    fig2.savefig(os.path.join(figs_dir, "alttrans_fwdbwd"))
+    # fig4.savefig(os.path.join(figs_dir, "alttrans_l2totrue"))
+        # save
+
+    end = time.time()
+    print("alt ray transform, elapsed time", end-start)
+    
+
+if DECONV:
+    fig, ax = plt.subplots(figsize = (8,6), dpi = 150) # loss plot
+    fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
+    # fig4, ax4 = plt.subplots(figsize = (8,6), dpi = 150) # l2 distance to minimum
+    # ax.axhline(true_min, label = "true min", linestyle = '--')
+
+    MAXITERS = 200
+    # TYPE 2: t_k = c/n
+    for c in [0.1,0.08,0.05,0.02,0.01]:
+        loss_mom = np.load(os.path.join(datpath, "deconv", "loss_mom_" + str(c*1000) + ".npy"))
+        loss_nomom = np.load(os.path.join(datpath, "deconv", "loss_nomom_" + str(c*1000) + ".npy"))
+        closeness_mom = np.load(os.path.join(datpath, "deconv", "fwdbwd_mom_" + str(c*1000) + ".npy"))
+        closeness_nomom = np.load(os.path.join(datpath, "deconv", "fwdbwd_nomom_" + str(c*1000) + ".npy"))
+        init_err = loss_mom[0]
+
+        ax.plot(loss_mom, label = str(c) + " mom", marker = 'o')
+        ax.plot(loss_nomom, label = str(c) + " nomom", marker = 'x')
+
+        ax2.plot(closeness_mom, label = str(c) + " mom", marker = 'o')
+        ax2.plot(closeness_nomom, label = str(c) + " nomom", marker = 'x')
+
+
+    fig.suptitle("Loss")
+    fig2.suptitle("Fwdbwd error")
+
+    ax.set_ylim([init_err*0.1, init_err*1.1])
+    ax2.set_ylim([currminfwdbwd.item()*0.95, init_closeness_mom*1.5])
+
+    fig.legend()
+    fig2.legend() 
+
+    fig.savefig(os.path.join(figs_dir, "deconv_losses"))
+    fig2.savefig(os.path.join(figs_dir, "deconv_fwdbwd"))
+
+    end = time.time()
+    print("deconv, elapsed time", end-start)
+# %%

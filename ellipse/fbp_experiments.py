@@ -39,8 +39,8 @@ from odl import uniform_discr
 from dival.util.odl_utility import ResizeOperator
 #%% EXPERIMENT PARAMETERS
 IMPL = 'astra_cuda'
-# MODE = "ELLIPSE"
-MODE = "LODOPAB"
+MODE = "ELLIPSE"
+# MODE = "LODOPAB"
 EXPTYPE = "MAN" # experiment type 
 MAXITERS = 1000 # maximum number of optim iter for experiments
 PLOT = False # use the other script to plot.
@@ -63,7 +63,7 @@ else: # manual
     CONSTSS = False
     MAPTRANSFER = False
     DOMAINCHANGE = False
-    ALTTRANSFORM = True
+    ALTTRANSFORM = False
     DECONV = False
 
 #%% INITIALIZATION
@@ -200,6 +200,8 @@ if __name__ == '__main__':
 
         with tf.io.gfile.GFile(os.path.join(figs_dir, "gt.png"), "wb") as fout:
             save_image(gt.detach().cpu(), fout, nrow = 5)
+        with tf.io.gfile.GFile(os.path.join(figs_dir, "fbp_batch_noisy.png"), "wb") as fout:
+            save_image(fbp_batch_noisy.detach().cpu(), fout, nrow = 5)
     # define objective functions (on respective devices)
     def recon_err(img):
         tv_h = torch.abs(img[:,:,1:,:]-img[:,:,:-1,:]).sum()

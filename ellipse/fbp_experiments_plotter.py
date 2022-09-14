@@ -43,8 +43,8 @@ from dival.util.constants import MU_MAX
 
 #%% EXPERIMENT PARAMETERS
 IMPL = 'astra_cuda'
-# MODE = "ELLIPSE"
-MODE = "LODOPAB"
+MODE = "ELLIPSE"
+# MODE = "LODOPAB"
 EXPTYPE = "MAN" # experiment type 
 LONGTIME = True
 MOMSPLIT = False
@@ -60,7 +60,7 @@ if EXPTYPE == "ALL":
     
 else: # manual
     STEPSIZEEXT = True
-    CONSTSS = False
+    CONSTSS = True
     MAPTRANSFER = False
     DOMAINCHANGE = False
     ALTTRANSFORM = True
@@ -189,10 +189,10 @@ if STEPSIZEEXT:
     fig2.legend() 
     fig3.legend()
     fig4.legend()
-    fig.savefig(os.path.join(figs_dir, "stepsize_ext_losses"))
-    fig2.savefig(os.path.join(figs_dir, "stepsize_ext_fwdbwd"))
-    fig3.savefig(os.path.join(figs_dir, "stepsize_ext_loglosses"))
-    fig4.savefig(os.path.join(figs_dir, "stepsize_ext_l2totrue"))
+    fig.savefig(os.path.join(figs_dir, "stepsize_ext_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "stepsize_ext_fwdbwd.pdf"))
+    fig3.savefig(os.path.join(figs_dir, "stepsize_ext_loglosses.pdf"))
+    fig4.savefig(os.path.join(figs_dir, "stepsize_ext_l2totrue.pdf"))
     end = time.time()
     print("adaptive stepsize extension done, elapsed time", end-start)
 
@@ -260,10 +260,10 @@ if CONSTSS:
     fig2.legend() 
     fig3.legend()
     fig4.legend()
-    fig.savefig(os.path.join(figs_dir, "constss_losses"))
-    fig2.savefig(os.path.join(figs_dir, "constss_fwdbwd"))
-    fig3.savefig(os.path.join(figs_dir, "constss_loglosses"))
-    fig4.savefig(os.path.join(figs_dir, "constss_l2totrue"))
+    fig.savefig(os.path.join(figs_dir, "constss_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "constss_fwdbwd.pdf"))
+    fig3.savefig(os.path.join(figs_dir, "constss_loglosses.pdf"))
+    fig4.savefig(os.path.join(figs_dir, "constss_l2totrue.pdf"))
 
     fig, ax = plt.subplots(figsize = (8,6), dpi = 150) # loss plot
     fig2, ax2 = plt.subplots(figsize = (8,6), dpi = 150) # fwdbwd plot
@@ -314,10 +314,10 @@ if CONSTSS:
     fig2.legend() 
     fig3.legend()
     fig4.legend()
-    fig.savefig(os.path.join(figs_dir, "recipss_losses"))
-    fig2.savefig(os.path.join(figs_dir, "recipss_fwdbwd"))
-    fig3.savefig(os.path.join(figs_dir, "recipss_loglosses"))
-    fig4.savefig(os.path.join(figs_dir, "recipss_l2totrue"))
+    fig.savefig(os.path.join(figs_dir, "recipss_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "recipss_fwdbwd.pdf"))
+    fig3.savefig(os.path.join(figs_dir, "recipss_loglosses.pdf"))
+    fig4.savefig(os.path.join(figs_dir, "recipss_l2totrue.pdf"))
     end = time.time()
     print("constant ss done, elapsed time", end-start)
 #%%
@@ -401,10 +401,10 @@ if MAPTRANSFER:
     fig2.legend() 
     fig3.legend()
     fig4.legend()
-    fig.savefig(os.path.join(figs_dir, "maptransfer_losses"))
-    fig2.savefig(os.path.join(figs_dir, "maptransfer_fwdbwd"))
-    fig3.savefig(os.path.join(figs_dir, "maptransfer_loglosses"))
-    fig4.savefig(os.path.join(figs_dir, "maptransfer_l2totrue"))
+    fig.savefig(os.path.join(figs_dir, "maptransfer_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "maptransfer_fwdbwd.pdf"))
+    fig3.savefig(os.path.join(figs_dir, "maptransfer_loglosses.pdf"))
+    fig4.savefig(os.path.join(figs_dir, "maptransfer_l2totrue.pdf"))
 
     print("map transfer done")
 
@@ -447,9 +447,9 @@ if ALTTRANSFORM:
     fig.legend()
     fig2.legend() 
     # fig4.legend()
-    fig.savefig(os.path.join(figs_dir, "alttrans_losses"))
-    fig2.savefig(os.path.join(figs_dir, "alttrans_fwdbwd"))
-    # fig4.savefig(os.path.join(figs_dir, "alttrans_l2totrue"))
+    fig.savefig(os.path.join(figs_dir, "alttrans_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "alttrans_fwdbwd.pdf"))
+    # fig4.savefig(os.path.join(figs_dir, "alttrans_l2totrue.pdf"))
         # save
 
     end = time.time()
@@ -487,8 +487,8 @@ if DECONV:
     fig.legend()
     fig2.legend() 
 
-    fig.savefig(os.path.join(figs_dir, "deconv_losses"))
-    fig2.savefig(os.path.join(figs_dir, "deconv_fwdbwd"))
+    fig.savefig(os.path.join(figs_dir, "deconv_losses.pdf"))
+    fig2.savefig(os.path.join(figs_dir, "deconv_fwdbwd.pdf"))
 
     end = time.time()
     print("deconv, elapsed time", end-start)

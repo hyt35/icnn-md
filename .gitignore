@@ -11,4 +11,7 @@ ellipse/datELLIPSE
 ellipse/datLODOPAB
 ellipse/datELLIPSElong
 ellipse/datLODOPABlong
+ellipse/datELLIPSE_deconvlong
+ellipse/datLODOPAB_deconvlong
 ellipse/figs/*/*.pdf
+ellipse/figs_deconv/*/*.pdf
